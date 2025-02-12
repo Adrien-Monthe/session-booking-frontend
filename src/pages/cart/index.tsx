@@ -12,7 +12,6 @@ const CartPage: React.FC = () => {
   if (!cartContext) {
     throw new Error("CartContext is not provided");
   }
-  const { cartSessions, clearCart } = cartContext;
   const [clientDetails, setClientDetails] = useState<ClientDetails>({
     name: '',
     email: '',
@@ -32,8 +31,7 @@ const CartPage: React.FC = () => {
       return;
     }
     setMessage('Booking confirmed successfully!');
-    console.log("Booking confirmed:", { clientDetails, cartSessions });
-    clearCart();
+    
   };
 
   const calculateSessionCost = (session: SessionData): number => {
