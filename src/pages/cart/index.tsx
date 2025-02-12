@@ -1,162 +1,250 @@
-import { CartContext, SessionData } from '@/contexts/CartContext';
-import React, { useContext, useState, ChangeEvent, FormEvent } from 'react';
+import React, { useState, useContext, ChangeEvent, FormEvent, useEffect } from 'react';
+import axios from 'axios';
+import { useRouter } from 'next/router';
+import moment from 'moment';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import { CartContext, SessionFormData } from '@/contexts/CartContext';
 
-interface ClientDetails {
+interface Trainer {
+  id: number;
   name: string;
-  email: string;
-  phone: string;
+  identifier: string;
+  pricePerHour: number;
 }
 
-const CartPage: React.FC = () => {
+const Cart: React.FC = () => {
+  const router = useRouter();
   const cartContext = useContext(CartContext);
   if (!cartContext) {
-    throw new Error("CartContext is not provided");
+    throw new Error('CartContext is not provided');
   }
-  const [clientDetails, setClientDetails] = useState<ClientDetails>({
+  const { cartSessions } = cartContext;
+
+  // If the cart is empty, redirect to home.
+  useEffect(() => {
+    if (cartSessions.length === 0) {
+      router.push('/');
+    }
+  }, [cartSessions, router]);
+
+  const [userData, setUserData] = useState({
     name: '',
     email: '',
-    phone: '',
+    phoneNumber: '',
+    termsAccepted: false,
   });
-  const [message, setMessage] = useState<string>('');
+  const [trainerMap, setTrainerMap] = useState<{ [key: string]: Trainer }>({});
 
-  const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setClientDetails((prev) => ({ ...prev, [name]: value }));
+  // Fetch trainer details for each unique trainer id in the cart
+  useEffect(() => {
+    async function fetchTrainers() {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+      if (!backendUrl) {
+        throw new Error('NEXT_PUBLIC_BACKEND_URL is not defined');
+      }
+      const uniqueTrainerIds = Array.from(new Set(cartSessions.map(session => session.trainer)));
+      const newTrainerMap: { [key: string]: Trainer } = {};
+
+      await Promise.all(
+        uniqueTrainerIds.map(async (id) => {
+          try {
+            const res = await axios.get(`${backendUrl}/trainers/${id}`);
+            newTrainerMap[id] = res.data;
+          } catch (error) {
+            console.error(`Error fetching trainer with id ${id}`, error);
+          }
+        })
+      );
+      setTrainerMap(newTrainerMap);
+    }
+    if (cartSessions.length > 0) {
+      fetchTrainers();
+    }
+  }, [cartSessions]);
+
+  const handleUserDataChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type, checked } = e.target;
+    setUserData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
   };
 
-  const handleConfirm = (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!clientDetails.name || !clientDetails.email || !clientDetails.phone) {
-      setMessage('Please fill in all client details.');
+
+    if (!userData.name || !userData.email || !userData.phoneNumber) {
+      toast.error('Please fill in all required fields.');
       return;
     }
-    setMessage('Booking confirmed successfully!');
-    
-  };
-
-  const calculateSessionCost = (session: SessionData): number => {
-    const [startH, startM, startS] = session.startTime.split(':').map(Number);
-    const [endH, endM, endS] = session.endTime.split(':').map(Number);
-    const startDate = new Date(0, 0, 0, startH, startM, startS);
-    const endDate = new Date(0, 0, 0, endH, endM, endS);
-    let diff = (endDate.getTime() - startDate.getTime()) / 60000;
-    if (diff < 0) diff += 24 * 60;
-    // If trainer is stored as an object, extract the price; otherwise, default to 0.
-    let trainerPrice = 0;
-    if (typeof session.trainer === 'object' && session.trainer !== null) {
-      trainerPrice = parseFloat(session.trainer.pricePerHour);
+    if (!userData.termsAccepted) {
+      toast.error('Please accept the terms and conditions.');
+      return;
     }
-    return trainerPrice * (diff / 60);
+
+    // Build the booking payload according to CreateBookingDto
+    const bookingPayload = {
+      clientName: userData.name,
+      clientEmail: userData.email,
+      clientPhone: userData.phoneNumber,
+      sessions: cartSessions.map(session => ({
+        date: session.date,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        trainerId: Number(session.trainer),
+        type: session.type.toLowerCase(), // converts to lowercase for matching your enum
+      })),
+      termsAccepted: userData.termsAccepted,
+    };
+
+    try {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
+      if (!backendUrl) {
+        throw new Error('NEXT_PUBLIC_BACKEND_URL is not defined');
+      }
+      await axios.post(`${backendUrl}/bookings`, bookingPayload);
+      toast.success('Booking completed successfully!');
+      // Optionally redirect or clear the cart here
+      router.push('/');
+    } catch (error) {
+      console.error('Error creating booking:', error);
+      toast.error('There was an error creating your booking. Please try again.');
+    }
   };
 
-  const totalPrice = cartSessions.reduce(
-    (acc: number, session: SessionData) => acc + calculateSessionCost(session),
-    0
-  );
+  // Calculate total price for each session and overall
+  const totalPrice = cartSessions.reduce((acc, session) => {
+    const trainer = trainerMap[session.trainer];
+    if (trainer) {
+      const start = moment(`${session.date}T${session.startTime}`);
+      const end = moment(`${session.date}T${session.endTime}`);
+      const diffInMinutes = end.diff(start, 'minutes');
+      const diffInHours = diffInMinutes / 60;
+      return acc + diffInHours * trainer.pricePerHour;
+    }
+    return acc;
+  }, 0);
 
   return (
-    <div className="max-w-4xl mx-auto p-4">
-      <h1 className="text-4xl font-bold text-center my-8">Confirm Your Booking</h1>
-      
-      {/* Cart Sessions Table */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold mb-4">Your Sessions</h2>
-        {cartSessions.length === 0 ? (
-          <p>Your cart is empty.</p>
-        ) : (
-          <table className="min-w-full border">
-            <thead>
-              <tr className="bg-gray-200">
-                <th className="py-2 px-4 border">Type</th>
-                <th className="py-2 px-4 border">Trainer</th>
-                <th className="py-2 px-4 border">Date</th>
-                <th className="py-2 px-4 border">Time</th>
-                <th className="py-2 px-4 border">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cartSessions.map((session) => (
-                <tr key={session.id}>
-                  <td className="py-2 px-4 border">{session.type}</td>
-                  <td className="py-2 px-4 border">
-                    {typeof session.trainer === 'object' ? session.trainer.name : session.trainer}
+    <div className="min-h-screen bg-gray-100 p-4">
+      <ToastContainer />
+      <h1 className="text-3xl font-bold text-center mb-6">Your Cart</h1>
+      <div className="flex flex-col md:flex-row gap-4">
+        {/* Left Column: Sessions Table */}
+        <div className="md:w-2/3 overflow-auto">
+          {cartSessions.length === 0 ? (
+            <p className="text-center">Your cart is empty.</p>
+          ) : (
+            <table className="min-w-full bg-white border border-gray-200">
+              <thead>
+                <tr>
+                  <th className="py-2 px-4 border-b">Date</th>
+                  <th className="py-2 px-4 border-b">Type</th>
+                  <th className="py-2 px-4 border-b">Trainer</th>
+                  <th className="py-2 px-4 border-b">Start Time</th>
+                  <th className="py-2 px-4 border-b">End Time</th>
+                  <th className="py-2 px-4 border-b">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cartSessions.map((session: SessionFormData, index: number) => {
+                  const trainer = trainerMap[session.trainer];
+                  let sessionPrice = 0;
+                  if (trainer) {
+                    const start = moment(`${session.date}T${session.startTime}`);
+                    const end = moment(`${session.date}T${session.endTime}`);
+                    const diffInMinutes = end.diff(start, 'minutes');
+                    const diffInHours = diffInMinutes / 60;
+                    sessionPrice = diffInHours * trainer.pricePerHour;
+                  }
+                  return (
+                    <tr key={index} className="text-center">
+                      <td className="py-2 px-4 border-b">{session.date}</td>
+                      <td className="py-2 px-4 border-b">{session.type}</td>
+                      <td className="py-2 px-4 border-b">{trainer ? trainer.name : session.trainer}</td>
+                      <td className="py-2 px-4 border-b">{session.startTime}</td>
+                      <td className="py-2 px-4 border-b">{session.endTime}</td>
+                      <td className="py-2 px-4 border-b">
+                        {trainer ? `$${sessionPrice.toFixed(2)}` : 'N/A'}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr className="font-bold">
+                  <td colSpan={5} className="py-2 px-4 text-right border-t">
+                    Total Price:
                   </td>
-                  <td className="py-2 px-4 border">{session.date}</td>
-                  <td className="py-2 px-4 border">
-                    {session.startTime} - {session.endTime}
-                  </td>
-                  <td className="py-2 px-4 border">
-                    ${calculateSessionCost(session).toFixed(2)}
+                  <td className="py-2 px-4 border-t">
+                    ${totalPrice.toFixed(2)}
                   </td>
                 </tr>
-              ))}
-              <tr className="font-bold">
-                <td className="py-2 px-4 border" colSpan={4}>
-                  Total
-                </td>
-                <td className="py-2 px-4 border">
-                  ${totalPrice.toFixed(2)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-      </div>
-      
-      {/* Client Details Form */}
-      <div className="p-4 border rounded shadow">
-        <h2 className="text-2xl font-bold mb-4">Enter Your Details</h2>
-        {message && <p className="mb-4 text-green-600">{message}</p>}
-        <form onSubmit={handleConfirm} className="space-y-4">
-          <div>
-            <label htmlFor="name" className="block text-gray-700 font-medium mb-1">
-              Name:
-            </label>
-            <input
-              type="text"
-              id="name"
-              name="name"
-              value={clientDetails.name}
-              onChange={handleInputChange}
-              className="w-full p-2 border border-gray-300 rounded"
-            />
-          </div>
-          <div>
-            <label htmlFor="email" className="block text-gray-700 font-medium mb-1">
-              Email:
-            </label>
-            <input
-              type="email"
-              id="email"
-              name="email"
-              value={clientDetails.email}
-              onChange={handleInputChange}
-              className="w-full p-2 border border-gray-300 rounded"
-            />
-          </div>
-          <div>
-            <label htmlFor="phone" className="block text-gray-700 font-medium mb-1">
-              Phone:
-            </label>
-            <input
-              type="tel"
-              id="phone"
-              name="phone"
-              value={clientDetails.phone}
-              onChange={handleInputChange}
-              className="w-full p-2 border border-gray-300 rounded"
-            />
-          </div>
-          <button
-            type="submit"
-            className="w-full mt-4 bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 font-bold"
-          >
-            Confirm Booking
-          </button>
-        </form>
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Right Column: User Information Form */}
+        <div className="md:w-1/3 bg-white p-6 rounded shadow-lg">
+          <h2 className="text-2xl font-bold mb-4 text-center">Enter Your Information</h2>
+          <form onSubmit={handleSubmit}>
+            <div className="mb-4">
+              <label htmlFor="name" className="block text-black mb-1">Name</label>
+              <input
+                type="text"
+                name="name"
+                id="name"
+                value={userData.name}
+                onChange={handleUserDataChange}
+                className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="mb-4">
+              <label htmlFor="email" className="block text-black mb-1">Email</label>
+              <input
+                type="email"
+                name="email"
+                id="email"
+                value={userData.email}
+                onChange={handleUserDataChange}
+                className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="mb-4">
+              <label htmlFor="phoneNumber" className="block text-black mb-1">Phone Number</label>
+              <input
+                type="tel"
+                name="phoneNumber"
+                id="phoneNumber"
+                value={userData.phoneNumber}
+                onChange={handleUserDataChange}
+                className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="mb-4 flex items-center">
+              <input
+                type="checkbox"
+                name="termsAccepted"
+                id="termsAccepted"
+                checked={userData.termsAccepted}
+                onChange={handleUserDataChange}
+                className="mr-2"
+              />
+              <label htmlFor="termsAccepted" className="text-black">
+                I accept the terms and conditions
+              </label>
+            </div>
+            <button
+              type="submit"
+              className="w-full bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 font-bold"
+            >
+              Submit Booking
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
 };
 
-export default CartPage;
+export default Cart;
