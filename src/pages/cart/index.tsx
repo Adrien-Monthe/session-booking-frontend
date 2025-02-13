@@ -19,9 +19,9 @@ const Cart: React.FC = () => {
   if (!cartContext) {
     throw new Error('CartContext is not provided');
   }
-  const { cartSessions } = cartContext;
+  const { cartSessions, clearCart } = cartContext;
 
-  // If the cart is empty, redirect to home.
+  // Redirect to home if the cart is empty.
   useEffect(() => {
     if (cartSessions.length === 0) {
       router.push('/');
@@ -36,7 +36,7 @@ const Cart: React.FC = () => {
   });
   const [trainerMap, setTrainerMap] = useState<{ [key: string]: Trainer }>({});
 
-  // Fetch trainer details for each unique trainer id in the cart
+  // Fetch trainer details for each unique trainer id in the cart.
   useEffect(() => {
     async function fetchTrainers() {
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL;
@@ -83,7 +83,7 @@ const Cart: React.FC = () => {
       return;
     }
 
-    // Build the booking payload according to CreateBookingDto
+    // Build the booking payload according to CreateBookingDto.
     const bookingPayload = {
       clientName: userData.name,
       clientEmail: userData.email,
@@ -93,7 +93,7 @@ const Cart: React.FC = () => {
         startTime: session.startTime,
         endTime: session.endTime,
         trainerId: Number(session.trainer),
-        type: session.type.toLowerCase(), // converts to lowercase for matching your enum
+        type: session.type.toLowerCase(),
       })),
       termsAccepted: userData.termsAccepted,
     };
@@ -105,7 +105,8 @@ const Cart: React.FC = () => {
       }
       await axios.post(`${backendUrl}/bookings`, bookingPayload);
       toast.success('Booking completed successfully!');
-      // Optionally redirect or clear the cart here
+      // Clear the cart after successful booking.
+      clearCart();
       router.push('/');
     } catch (error) {
       console.error('Error creating booking:', error);
@@ -113,7 +114,7 @@ const Cart: React.FC = () => {
     }
   };
 
-  // Calculate total price for each session and overall
+  // Calculate total price for the sessions.
   const totalPrice = cartSessions.reduce((acc, session) => {
     const trainer = trainerMap[session.trainer];
     if (trainer) {

@@ -1,3 +1,4 @@
+// contexts/CartContext.tsx
 import React, { createContext, useState, ReactNode } from 'react';
 
 export interface SessionFormData {
@@ -16,6 +17,7 @@ export interface Trainer {
 interface CartContextProps {
   cartSessions: SessionFormData[];
   addSession: (session: SessionFormData) => void;
+  clearCart: () => void;
 }
 
 export const CartContext = createContext<CartContextProps | undefined>(undefined);
@@ -27,8 +29,12 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
     setCartSessions((prev) => [...prev, session]);
   };
 
+  const clearCart = () => {
+    setCartSessions([]);
+  };
+
   return (
-    <CartContext.Provider value={{ cartSessions, addSession }}>
+    <CartContext.Provider value={{ cartSessions, addSession, clearCart }}>
       {children}
     </CartContext.Provider>
   );
